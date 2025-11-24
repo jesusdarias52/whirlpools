@@ -1,14 +1,4 @@
-use crate::{
-    sqrt_price_to_tick_index, tick_index_to_sqrt_price, try_apply_swap_fee, try_apply_transfer_fee,
-    try_get_amount_delta_a, try_get_amount_delta_b, try_get_max_amount_with_slippage_tolerance,
-    try_get_min_amount_with_slippage_tolerance, try_get_next_sqrt_price_from_a,
-    try_get_next_sqrt_price_from_b, try_reverse_apply_swap_fee, try_reverse_apply_transfer_fee,
-    AdaptiveFeeInfo, CoreError, ExactInSwapQuote, ExactOutSwapQuote, FeeRateManager, OracleFacade,
-    TickArraySequence, TickArrays, TickFacade, TransferFee, WhirlpoolFacade,
-    AMOUNT_EXCEEDS_MAX_U64, ARITHMETIC_OVERFLOW, INVALID_ADAPTIVE_FEE_INFO,
-    INVALID_SQRT_PRICE_LIMIT_DIRECTION, MAX_SQRT_PRICE, MIN_SQRT_PRICE,
-    SQRT_PRICE_LIMIT_OUT_OF_BOUNDS, ZERO_TRADABLE_AMOUNT,
-};
+use crate::{sqrt_price_to_tick_index, tick_index_to_sqrt_price, try_apply_swap_fee, try_apply_transfer_fee, try_get_amount_delta_a, try_get_amount_delta_b, try_get_max_amount_with_slippage_tolerance, try_get_min_amount_with_slippage_tolerance, try_get_next_sqrt_price_from_a, try_get_next_sqrt_price_from_b, try_reverse_apply_swap_fee, try_reverse_apply_transfer_fee, AdaptiveFeeInfo, CoreError, ExactInSwapQuote, ExactOutSwapQuote, FeeRateManager, OracleFacade, TickArraySequence, TickArrays, TickFacade, TransferFee, WhirlpoolFacade, AMOUNT_EXCEEDS_MAX_U64, ARITHMETIC_OVERFLOW, INVALID_ADAPTIVE_FEE_INFO, INVALID_SQRT_PRICE_LIMIT_DIRECTION, LIQUIDITY_OVERFLOW, MAX_SQRT_PRICE, MIN_SQRT_PRICE, SQRT_PRICE_LIMIT_OUT_OF_BOUNDS, ZERO_TRADABLE_AMOUNT};
 
 #[cfg(feature = "wasm")]
 use orca_whirlpools_macros::wasm_expose;
@@ -316,7 +306,7 @@ pub fn compute_swap<const SIZE: usize>(
             }
 
             if step_quote.next_sqrt_price == next_tick_sqrt_price {
-                current_liquidity = get_next_liquidity(current_liquidity, next_tick, a_to_b);
+                current_liquidity = get_next_liquidity(current_liquidity, next_tick, a_to_b)?;
                 current_tick_index = if a_to_b {
                     next_tick_index - 1
                 } else {
@@ -380,21 +370,26 @@ fn get_next_liquidity(
     current_liquidity: u128,
     next_tick: Option<&TickFacade>,
     a_to_b: bool,
-) -> u128 {
+) -> Result<u128, CoreError> {
     let liquidity_net = next_tick.map(|tick| tick.liquidity_net).unwrap_or(0);
-    let liquidity_net_unsigned = liquidity_net.unsigned_abs();
-    if a_to_b {
+
+    let new_liquidity = if a_to_b {
         if liquidity_net < 0 {
-            current_liquidity + liquidity_net_unsigned
+            current_liquidity.checked_add(liquidity_net.unsigned_abs())
         } else {
-            current_liquidity - liquidity_net_unsigned
+            current_liquidity.checked_sub(liquidity_net as u128)
         }
-    } else if liquidity_net < 0 {
-        current_liquidity - liquidity_net_unsigned
     } else {
-        current_liquidity + liquidity_net_unsigned
-    }
+        if liquidity_net < 0 {
+            current_liquidity.checked_sub(liquidity_net.unsigned_abs())
+        } else {
+            current_liquidity.checked_add(liquidity_net as u128)
+        }
+    };
+
+    new_liquidity.ok_or(LIQUIDITY_OVERFLOW)
 }
+
 
 struct SwapStepQuote {
     amount_in: u64,
