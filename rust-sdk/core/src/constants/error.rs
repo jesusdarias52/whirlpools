@@ -52,3 +52,6 @@ pub const INVALID_TICK_ARRAY_SEQUENCE: CoreError = "Invalid tick array sequence"
 
 #[cfg_attr(feature = "wasm", wasm_expose)]
 pub const INVALID_ADAPTIVE_FEE_INFO: CoreError = "Invalid adaptive fee info";
+
+pub const LIQUIDITY_OVERFLOW: CoreError = "Liquidity overflow";
+
