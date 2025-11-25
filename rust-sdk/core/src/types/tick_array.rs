@@ -71,48 +71,48 @@ impl From<TickArrays> for [Option<TickArrayFacade>; 6] {
 }
 
 #[cfg(not(feature = "wasm"))]
-impl From<TickArrays> for [Option<TickArrayFacade>; 6] {
+impl From<TickArrays> for Vec<Option<TickArrayFacade>> {
     fn from(val: TickArrays) -> Self {
         match val {
-            TickArrays::One(tick_array) => [Some(tick_array), None, None, None, None, None],
-            TickArrays::Two(tick_array_1, tick_array_2) => [
+            TickArrays::One(tick_array) => Vec::from([Some(tick_array), None, None, None, None, None]),
+            TickArrays::Two(tick_array_1, tick_array_2) => Vec::from([
                 Some(tick_array_1),
                 Some(tick_array_2),
                 None,
                 None,
                 None,
                 None,
-            ],
-            TickArrays::Three(tick_array_1, tick_array_2, tick_array_3) => [
+            ]),
+            TickArrays::Three(tick_array_1, tick_array_2, tick_array_3) => Vec::from([
                 Some(tick_array_1),
                 Some(tick_array_2),
                 Some(tick_array_3),
                 None,
                 None,
                 None,
-            ],
-            TickArrays::Four(tick_array_1, tick_array_2, tick_array_3, tick_array_4) => [
+            ]),
+            TickArrays::Four(tick_array_1, tick_array_2, tick_array_3, tick_array_4) => Vec::from([
                 Some(tick_array_1),
                 Some(tick_array_2),
                 Some(tick_array_3),
                 Some(tick_array_4),
                 None,
                 None,
-            ],
+            ]),
             TickArrays::Five(
                 tick_array_1,
                 tick_array_2,
                 tick_array_3,
                 tick_array_4,
                 tick_array_5,
-            ) => [
+            ) => Vec::from([
                 Some(tick_array_1),
                 Some(tick_array_2),
                 Some(tick_array_3),
                 Some(tick_array_4),
                 Some(tick_array_5),
                 None,
-            ],
+            ]),
             TickArrays::Six(
                 tick_array_1,
                 tick_array_2,
@@ -120,14 +120,14 @@ impl From<TickArrays> for [Option<TickArrayFacade>; 6] {
                 tick_array_4,
                 tick_array_5,
                 tick_array_6,
-            ) => [
+            ) => Vec::from([
                 Some(tick_array_1),
                 Some(tick_array_2),
                 Some(tick_array_3),
                 Some(tick_array_4),
                 Some(tick_array_5),
                 Some(tick_array_6),
-            ],
+            ]),
         }
     }
 }

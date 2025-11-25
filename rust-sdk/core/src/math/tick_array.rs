@@ -10,14 +10,14 @@ use super::{
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TickArraySequence<const SIZE: usize> {
-    pub tick_arrays: [Option<TickArrayFacade>; SIZE],
+pub struct TickArraySequence {
+    pub tick_arrays: Vec<Option<TickArrayFacade>>,
     pub tick_spacing: u16,
 }
 
-impl<const SIZE: usize> TickArraySequence<SIZE> {
+impl TickArraySequence {
     pub fn new(
-        tick_arrays: [Option<TickArrayFacade>; SIZE],
+        tick_arrays: Vec<Option<TickArrayFacade>>,
         tick_spacing: u16,
     ) -> Result<Self, CoreError> {
         let mut tick_arrays = tick_arrays;
@@ -187,18 +187,18 @@ mod tests {
         tick_spacing: u16,
         ticks: [TickFacade; TICK_ARRAY_SIZE],
         start_tick_index: i32,
-    ) -> TickArraySequence<5> {
+    ) -> TickArraySequence {
         let one = TickArrayFacade {
             start_tick_index,
             ticks,
         };
-        TickArraySequence::new([Some(one), None, None, None, None], tick_spacing).unwrap()
+        TickArraySequence::new(Vec::from([Some(one), None, None, None, None]), tick_spacing).unwrap()
     }
 
     fn test_sequence(
         tick_spacing: u16,
         ticks: [TickFacade; TICK_ARRAY_SIZE],
-    ) -> TickArraySequence<5> {
+    ) -> TickArraySequence {
         let one = TickArrayFacade {
             start_tick_index: -(TICK_ARRAY_SIZE as i32 * tick_spacing as i32),
             ticks,
@@ -212,7 +212,7 @@ mod tests {
             ticks,
         };
         TickArraySequence::new(
-            [Some(one), Some(two), Some(three), None, None],
+            Vec::from([Some(one), Some(two), Some(three), None, None]),
             tick_spacing,
         )
         .unwrap()
@@ -243,7 +243,7 @@ mod tests {
 
     #[test]
     fn test_get_tick_large_tick_spacing() {
-        let sequence: TickArraySequence<5> =
+        let sequence: TickArraySequence =
             test_sequence(32896, test_ticks_alternating_initialized());
         assert_eq!(sequence.tick(-427648).map(|x| x.liquidity_net), Ok(75));
         assert_eq!(sequence.tick(0).map(|x| x.liquidity_net), Ok(0));

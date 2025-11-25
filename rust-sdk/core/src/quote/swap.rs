@@ -185,11 +185,11 @@ pub struct SwapResult {
 /// - This function doesn't take into account slippage tolerance.
 /// - This function doesn't take into account transfer fee extension.
 #[allow(clippy::too_many_arguments)]
-pub fn compute_swap<const SIZE: usize>(
+pub fn compute_swap(
     token_amount: u64,
     sqrt_price_limit: u128,
     whirlpool: WhirlpoolFacade,
-    tick_sequence: &TickArraySequence<SIZE>,
+    tick_sequence: &TickArraySequence,
     a_to_b: bool,
     specified_input: bool,
     timestamp: u64,
