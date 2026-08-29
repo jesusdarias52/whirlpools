@@ -80,17 +80,20 @@ pub struct SwapCounters {
     // whichever combination its own measurements support.
     /// `numerator / denominator` (with its paired `%`) operations on U256 operands.
     pub u256_divs: u32,
-    /// Summed 64-bit limb count of those numerators, 1..=4 each.
-    pub u256_div_num_words: u32,
-    /// Summed 64-bit limb count of those denominators, 1..=4 each.
-    pub u256_div_den_words: u32,
-    /// Summed `max(0, num_words - den_words)`, the extra long-division outer iterations
-    /// beyond the first. Kept alongside the two raw sums because it is the quantity the
-    /// algorithm's loop count actually follows, and deriving it from the sums afterwards
-    /// is not possible — the sums lose the per-call pairing.
-    pub u256_div_extra_iters: u32,
-    /// `u128` divisions in the fee/transfer helpers, which are a different and much
-    /// cheaper primitive than the U256 ones above.
+    /// Of those, the ones the *on-chain* `U256Muldiv::div` returns from before doing any
+    /// arithmetic: a zero dividend, or a dividend narrower than the divisor.
+    pub u256_div_trivial: u32,
+    /// Divisions the chain answers with a single native `u128` divide, because the dividend
+    /// fits in two 64-bit limbs.
+    pub u256_div_u128: u32,
+    /// Divisions with a single-limb divisor, which the chain special-cases into a loop of
+    /// one `u128` divide per dividend limb — and the summed trip count of those loops.
+    pub u256_div_short_calls: u32,
+    pub u256_div_short_iters: u32,
+    /// Divisions that reach the general normalized long division, and the summed
+    /// `num_dividend_words - num_divisor_words + 1` outer iterations they perform.
+    pub u256_div_knuth_calls: u32,
+    pub u256_div_knuth_iters: u32,
     pub u128_divs: u32,
 }
 
@@ -109,9 +112,12 @@ impl SwapCounters {
         sqrt_to_tick_log2_iters: 0,
         sqrt_to_tick_refines: 0,
         u256_divs: 0,
-        u256_div_num_words: 0,
-        u256_div_den_words: 0,
-        u256_div_extra_iters: 0,
+        u256_div_trivial: 0,
+        u256_div_u128: 0,
+        u256_div_short_calls: 0,
+        u256_div_short_iters: 0,
+        u256_div_knuth_calls: 0,
+        u256_div_knuth_iters: 0,
         u128_divs: 0,
     };
 
@@ -142,15 +148,12 @@ impl SwapCounters {
                 .sqrt_to_tick_refines
                 .saturating_sub(base.sqrt_to_tick_refines),
             u256_divs: self.u256_divs.saturating_sub(base.u256_divs),
-            u256_div_num_words: self
-                .u256_div_num_words
-                .saturating_sub(base.u256_div_num_words),
-            u256_div_den_words: self
-                .u256_div_den_words
-                .saturating_sub(base.u256_div_den_words),
-            u256_div_extra_iters: self
-                .u256_div_extra_iters
-                .saturating_sub(base.u256_div_extra_iters),
+            u256_div_trivial: self.u256_div_trivial.saturating_sub(base.u256_div_trivial),
+            u256_div_u128: self.u256_div_u128.saturating_sub(base.u256_div_u128),
+            u256_div_short_calls: self.u256_div_short_calls.saturating_sub(base.u256_div_short_calls),
+            u256_div_short_iters: self.u256_div_short_iters.saturating_sub(base.u256_div_short_iters),
+            u256_div_knuth_calls: self.u256_div_knuth_calls.saturating_sub(base.u256_div_knuth_calls),
+            u256_div_knuth_iters: self.u256_div_knuth_iters.saturating_sub(base.u256_div_knuth_iters),
             u128_divs: self.u128_divs.saturating_sub(base.u128_divs),
         }
     }
@@ -184,21 +187,39 @@ mod imp {
     }
 }
 
-/// Record one U256 division (and its paired remainder) with its operands' limb widths.
+/// Record one U256 division, classified into the cost class the **on-chain** program's
+/// `U256Muldiv::div` will take for these operand widths.
 ///
-/// Taken as bit counts so the caller does not have to depend on the `ethnum` type here.
+/// Deliberately not a width sum. That division is a four-way branch on the operands'
+/// 64-bit limb counts — return early, one native `u128` divide, a per-limb loop, or the
+/// general normalized long division — and those classes differ by more than an order of
+/// magnitude, so a linear term over pooled widths cannot express them. The classification
+/// mirrors `programs/whirlpool/src/math/u256_math.rs` case for case; `num_words()` there is
+/// the index of the highest non-zero limb plus one, i.e. exactly `bits.div_ceil(64)`.
+///
+/// The SDK divides with `ethnum` and the chain with its own `U256Muldiv`, which is why this
+/// takes widths rather than counting inside either: the two implementations differ, but they
+/// are handed the same operands, and it is the operands that select the chain's branch.
 #[inline(always)]
 #[allow(unused_variables)]
 pub(crate) fn record_u256_div(num_bits: u32, den_bits: u32) {
     #[cfg(feature = "cu-counters")]
     {
-        let nw = num_bits.div_ceil(64).max(1);
-        let dw = den_bits.div_ceil(64).max(1);
+        let nd = num_bits.div_ceil(64);
+        let dv = den_bits.div_ceil(64);
         bump(|c| {
             c.u256_divs += 1;
-            c.u256_div_num_words += nw;
-            c.u256_div_den_words += dw;
-            c.u256_div_extra_iters += nw.saturating_sub(dw);
+            if nd == 0 || nd < dv {
+                c.u256_div_trivial += 1;
+            } else if nd < 3 {
+                c.u256_div_u128 += 1;
+            } else if dv == 1 {
+                c.u256_div_short_calls += 1;
+                c.u256_div_short_iters += nd;
+            } else {
+                c.u256_div_knuth_calls += 1;
+                c.u256_div_knuth_iters += nd - dv + 1;
+            }
         });
     }
 }
