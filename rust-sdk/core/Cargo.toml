@@ -16,6 +16,9 @@ default = ["floats", "swap"]
 wasm = ["dep:wasm-bindgen", "dep:serde", "dep:serde-big-array", "dep:serde-wasm-bindgen", "dep:js-sys", "dep:tsify"]
 floats = ["dep:libm"]
 swap = []
+# Per-swap work counters on `SwapResult::counters`. Off by default: the swap path is
+# byte-identical without it. See src/counters.rs.
+cu-counters = []
 
 [dependencies]
 ethnum = { version = "^1.1" }

@@ -88,6 +88,12 @@ pub fn sqrt_price_to_tick_index(sqrt_price: U128) -> i32 {
         precision += 1;
     }
 
+    // `precision` is the loop's own trip count, read after it has run.
+    crate::counters::bump(|c| {
+        c.sqrt_to_tick_calls += 1;
+        c.sqrt_to_tick_log2_iters += precision as u32;
+    });
+
     let log2p_fraction_x32 = log2p_fraction_x64 >> 32;
     let log2p_x32 = log2p_integer_x32 + log2p_fraction_x32;
 
@@ -101,6 +107,9 @@ pub fn sqrt_price_to_tick_index(sqrt_price: U128) -> i32 {
     if tick_low == tick_high {
         tick_low
     } else {
+        // The tie-break below runs a further `tick_index_to_sqrt_price`, which that
+        // ladder counts for itself — this only records that the branch was taken.
+        crate::counters::bump(|c| c.sqrt_to_tick_refines += 1);
         // If our estimation for tick_high returns a lower sqrt_price than the input
         // then the actual tick_high has to be higher than tick_high.
         // Otherwise, the actual value is between tick_low & tick_high, so a floor value
@@ -327,6 +336,11 @@ fn mul_shift_96(n0: u128, n1: u128) -> u128 {
 }
 
 fn get_sqrt_price_positive_tick(tick: i32) -> u128 {
+    // `ops` counts the `mul_shift_96` calls this ladder actually makes, incremented beside
+    // the branch that makes each one rather than derived from `tick`'s popcount — a
+    // derivation would be a second copy of the branch structure below. Bit 1 selects the
+    // seed constant and costs no multiply, which is why it is not counted.
+    let mut ops: u32 = 0;
     let mut ratio: u128 = if tick & 1 != 0 {
         79232123823359799118286999567
     } else {
@@ -334,64 +348,91 @@ fn get_sqrt_price_positive_tick(tick: i32) -> u128 {
     };
 
     if tick & 2 != 0 {
+        ops += 1;
         ratio = mul_shift_96(ratio, 79236085330515764027303304731);
     }
     if tick & 4 != 0 {
+        ops += 1;
         ratio = mul_shift_96(ratio, 79244008939048815603706035061);
     }
     if tick & 8 != 0 {
+        ops += 1;
         ratio = mul_shift_96(ratio, 79259858533276714757314932305);
     }
     if tick & 16 != 0 {
+        ops += 1;
         ratio = mul_shift_96(ratio, 79291567232598584799939703904);
     }
     if tick & 32 != 0 {
+        ops += 1;
         ratio = mul_shift_96(ratio, 79355022692464371645785046466);
     }
     if tick & 64 != 0 {
+        ops += 1;
         ratio = mul_shift_96(ratio, 79482085999252804386437311141);
     }
     if tick & 128 != 0 {
+        ops += 1;
         ratio = mul_shift_96(ratio, 79736823300114093921829183326);
     }
     if tick & 256 != 0 {
+        ops += 1;
         ratio = mul_shift_96(ratio, 80248749790819932309965073892);
     }
     if tick & 512 != 0 {
+        ops += 1;
         ratio = mul_shift_96(ratio, 81282483887344747381513967011);
     }
     if tick & 1024 != 0 {
+        ops += 1;
         ratio = mul_shift_96(ratio, 83390072131320151908154831281);
     }
     if tick & 2048 != 0 {
+        ops += 1;
         ratio = mul_shift_96(ratio, 87770609709833776024991924138);
     }
     if tick & 4096 != 0 {
+        ops += 1;
         ratio = mul_shift_96(ratio, 97234110755111693312479820773);
     }
     if tick & 8192 != 0 {
+        ops += 1;
         ratio = mul_shift_96(ratio, 119332217159966728226237229890);
     }
     if tick & 16384 != 0 {
+        ops += 1;
         ratio = mul_shift_96(ratio, 179736315981702064433883588727);
     }
     if tick & 32768 != 0 {
+        ops += 1;
         ratio = mul_shift_96(ratio, 407748233172238350107850275304);
     }
     if tick & 65536 != 0 {
+        ops += 1;
         ratio = mul_shift_96(ratio, 2098478828474011932436660412517);
     }
     if tick & 131072 != 0 {
+        ops += 1;
         ratio = mul_shift_96(ratio, 55581415166113811149459800483533);
     }
     if tick & 262144 != 0 {
+        ops += 1;
         ratio = mul_shift_96(ratio, 38992368544603139932233054999993551);
     }
 
+    crate::counters::bump(|c| {
+        c.ladder_pos_calls += 1;
+        c.ladder_pos_ops += ops;
+    });
     ratio >> 32
 }
 
 fn get_sqrt_price_negative_tick(tick: i32) -> u128 {
+    // Counted separately from the positive ladder on purpose: every step here is a bare
+    // `u128` multiply and shift, where the positive ladder's `mul_shift_96` is a U256
+    // multiply. Same set-bit rule, materially different cost per op, so the two must not
+    // share a coefficient.
+    let mut ops: u32 = 0;
     let abs_tick = tick.abs();
 
     let mut ratio: u128 = if abs_tick & 1 != 0 {
@@ -401,60 +442,82 @@ fn get_sqrt_price_negative_tick(tick: i32) -> u128 {
     };
 
     if abs_tick & 2 != 0 {
+        ops += 1;
         ratio = (ratio * 18444899583751176498) >> 64
     }
     if abs_tick & 4 != 0 {
+        ops += 1;
         ratio = (ratio * 18443055278223354162) >> 64
     }
     if abs_tick & 8 != 0 {
+        ops += 1;
         ratio = (ratio * 18439367220385604838) >> 64
     }
     if abs_tick & 16 != 0 {
+        ops += 1;
         ratio = (ratio * 18431993317065449817) >> 64
     }
     if abs_tick & 32 != 0 {
+        ops += 1;
         ratio = (ratio * 18417254355718160513) >> 64
     }
     if abs_tick & 64 != 0 {
+        ops += 1;
         ratio = (ratio * 18387811781193591352) >> 64
     }
     if abs_tick & 128 != 0 {
+        ops += 1;
         ratio = (ratio * 18329067761203520168) >> 64
     }
     if abs_tick & 256 != 0 {
+        ops += 1;
         ratio = (ratio * 18212142134806087854) >> 64
     }
     if abs_tick & 512 != 0 {
+        ops += 1;
         ratio = (ratio * 17980523815641551639) >> 64
     }
     if abs_tick & 1024 != 0 {
+        ops += 1;
         ratio = (ratio * 17526086738831147013) >> 64
     }
     if abs_tick & 2048 != 0 {
+        ops += 1;
         ratio = (ratio * 16651378430235024244) >> 64
     }
     if abs_tick & 4096 != 0 {
+        ops += 1;
         ratio = (ratio * 15030750278693429944) >> 64
     }
     if abs_tick & 8192 != 0 {
+        ops += 1;
         ratio = (ratio * 12247334978882834399) >> 64
     }
     if abs_tick & 16384 != 0 {
+        ops += 1;
         ratio = (ratio * 8131365268884726200) >> 64
     }
     if abs_tick & 32768 != 0 {
+        ops += 1;
         ratio = (ratio * 3584323654723342297) >> 64
     }
     if abs_tick & 65536 != 0 {
+        ops += 1;
         ratio = (ratio * 696457651847595233) >> 64
     }
     if abs_tick & 131072 != 0 {
+        ops += 1;
         ratio = (ratio * 26294789957452057) >> 64
     }
     if abs_tick & 262144 != 0 {
+        ops += 1;
         ratio = (ratio * 37481735321082) >> 64
     }
 
+    crate::counters::bump(|c| {
+        c.ladder_neg_calls += 1;
+        c.ladder_neg_ops += ops;
+    });
     ratio
 }
 

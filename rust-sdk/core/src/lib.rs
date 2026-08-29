@@ -5,11 +5,13 @@
 #![allow(clippy::useless_conversion)]
 
 mod constants;
+mod counters;
 mod math;
 mod quote;
 mod types;
 
 pub use constants::*;
+pub use counters::SwapCounters;
 pub use math::*;
 pub use quote::*;
 pub use types::*;

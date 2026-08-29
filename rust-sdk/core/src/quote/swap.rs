@@ -161,6 +161,9 @@ pub struct SwapResult {
     pub trade_fee: u64,
     pub applied_fee_rate_min: u32,
     pub applied_fee_rate_max: u32,
+    /// Work this swap performed. All-zero unless the `cu-counters` feature is on; see
+    /// [`SwapCounters`](crate::SwapCounters). Never read back into the amounts above.
+    pub counters: crate::SwapCounters,
 }
 
 /// Computes the amounts of tokens A and B based on the current Whirlpool state and tick sequence.
@@ -242,7 +245,12 @@ pub fn compute_swap(
         &adaptive_fee_info,
     )?;
 
+    // Snapshotted rather than zeroed: the counters are a thread-local, so subtracting a
+    // baseline is what makes a nested or repeated call report only its own work.
+    let counters_at_entry = crate::counters::snapshot();
+
     while amount_remaining > 0 && sqrt_price_limit != current_sqrt_price {
+        crate::counters::bump(|c| c.tick_steps += 1);
         let (next_tick, next_tick_index) = if a_to_b {
             tick_sequence.prev_initialized_tick(current_tick_index)?
         } else {
@@ -256,6 +264,7 @@ pub fn compute_swap(
         };
 
         loop {
+            crate::counters::bump(|c| c.substeps += 1);
             fee_rate_manager.update_volatility_accumulator();
 
             let total_fee_rate = fee_rate_manager.get_total_fee_rate();
@@ -272,6 +281,13 @@ pub fn compute_swap(
 
             let (bounded_sqrt_price_target, adaptive_fee_update_skipped) = fee_rate_manager
                 .get_bounded_sqrt_price_target(target_sqrt_price, current_liquidity);
+
+            crate::counters::bump(|c| {
+                c.swap_steps += 1;
+                if adaptive_fee_update_skipped {
+                    c.adaptive_skips += 1;
+                }
+            });
 
             let step_quote = compute_swap_step(
                 amount_remaining,
@@ -306,6 +322,7 @@ pub fn compute_swap(
             }
 
             if step_quote.next_sqrt_price == next_tick_sqrt_price {
+                crate::counters::bump(|c| c.liquidity_crossings += 1);
                 current_liquidity = get_next_liquidity(current_liquidity, next_tick, a_to_b)?;
                 current_tick_index = if a_to_b {
                     next_tick_index - 1
@@ -361,6 +378,7 @@ pub fn compute_swap(
         trade_fee,
         applied_fee_rate_min: applied_fee_rate_min.unwrap_or(base_fee_rate as u32),
         applied_fee_rate_max: applied_fee_rate_max.unwrap_or(base_fee_rate as u32),
+        counters: crate::counters::snapshot().since(&counters_at_entry),
     })
 }
 
