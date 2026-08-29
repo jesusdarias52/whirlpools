@@ -69,6 +69,29 @@ pub struct SwapCounters {
     /// `tick_index_to_sqrt_price` to break the tie. That nested call is *also* counted in
     /// the ladder fields above, as it should be — it is work that ran.
     pub sqrt_to_tick_refines: u32,
+
+    // ---- U256 divisions ----------------------------------------------------------------
+    //
+    // `ethnum::U256` division is a software long division whose iteration count is a
+    // function of the two operands' limb widths, not of the type. Every price and amount
+    // step in a swap performs one, so on a long walk the *width* of the numbers being
+    // divided is a real per-sub-step cost axis that a flat per-sub-step rate cannot carry.
+    // Recorded as raw widths rather than as a fitted "work" figure so a caller can price
+    // whichever combination its own measurements support.
+    /// `numerator / denominator` (with its paired `%`) operations on U256 operands.
+    pub u256_divs: u32,
+    /// Summed 64-bit limb count of those numerators, 1..=4 each.
+    pub u256_div_num_words: u32,
+    /// Summed 64-bit limb count of those denominators, 1..=4 each.
+    pub u256_div_den_words: u32,
+    /// Summed `max(0, num_words - den_words)`, the extra long-division outer iterations
+    /// beyond the first. Kept alongside the two raw sums because it is the quantity the
+    /// algorithm's loop count actually follows, and deriving it from the sums afterwards
+    /// is not possible — the sums lose the per-call pairing.
+    pub u256_div_extra_iters: u32,
+    /// `u128` divisions in the fee/transfer helpers, which are a different and much
+    /// cheaper primitive than the U256 ones above.
+    pub u128_divs: u32,
 }
 
 impl SwapCounters {
@@ -85,6 +108,11 @@ impl SwapCounters {
         sqrt_to_tick_calls: 0,
         sqrt_to_tick_log2_iters: 0,
         sqrt_to_tick_refines: 0,
+        u256_divs: 0,
+        u256_div_num_words: 0,
+        u256_div_den_words: 0,
+        u256_div_extra_iters: 0,
+        u128_divs: 0,
     };
 
     /// Field-wise `self - base`, for turning two snapshots into the work done between them.
@@ -113,6 +141,17 @@ impl SwapCounters {
             sqrt_to_tick_refines: self
                 .sqrt_to_tick_refines
                 .saturating_sub(base.sqrt_to_tick_refines),
+            u256_divs: self.u256_divs.saturating_sub(base.u256_divs),
+            u256_div_num_words: self
+                .u256_div_num_words
+                .saturating_sub(base.u256_div_num_words),
+            u256_div_den_words: self
+                .u256_div_den_words
+                .saturating_sub(base.u256_div_den_words),
+            u256_div_extra_iters: self
+                .u256_div_extra_iters
+                .saturating_sub(base.u256_div_extra_iters),
+            u128_divs: self.u128_divs.saturating_sub(base.u128_divs),
         }
     }
 }
@@ -142,6 +181,25 @@ mod imp {
         COUNTERS
             .try_with(|c| c.try_borrow().map(|c| *c).unwrap_or(SwapCounters::ZERO))
             .unwrap_or(SwapCounters::ZERO)
+    }
+}
+
+/// Record one U256 division (and its paired remainder) with its operands' limb widths.
+///
+/// Taken as bit counts so the caller does not have to depend on the `ethnum` type here.
+#[inline(always)]
+#[allow(unused_variables)]
+pub(crate) fn record_u256_div(num_bits: u32, den_bits: u32) {
+    #[cfg(feature = "cu-counters")]
+    {
+        let nw = num_bits.div_ceil(64).max(1);
+        let dw = den_bits.div_ceil(64).max(1);
+        bump(|c| {
+            c.u256_divs += 1;
+            c.u256_div_num_words += nw;
+            c.u256_div_den_words += dw;
+            c.u256_div_extra_iters += nw.saturating_sub(dw);
+        });
     }
 }
 
