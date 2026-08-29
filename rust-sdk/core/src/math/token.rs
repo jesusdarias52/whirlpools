@@ -28,6 +28,8 @@ pub fn try_get_amount_delta_a(
     let (sqrt_price_lower, sqrt_price_upper) =
         order_prices(sqrt_price_1.into(), sqrt_price_2.into());
     let sqrt_price_diff = sqrt_price_upper - sqrt_price_lower;
+    crate::counters::record_u256_mul(liquidity.into(), sqrt_price_diff);
+    crate::counters::record_u256_mul(sqrt_price_lower, sqrt_price_upper);
     let numerator: U256 = <U256>::from(liquidity)
         .checked_mul(sqrt_price_diff.into())
         .ok_or(ARITHMETIC_OVERFLOW)?
@@ -75,6 +77,7 @@ pub fn try_get_amount_delta_b(
         order_prices(sqrt_price_1.into(), sqrt_price_2.into());
     let sqrt_price_diff = sqrt_price_upper - sqrt_price_lower;
 
+    crate::counters::record_u256_mul(liquidity.into(), sqrt_price_diff);
     let product: U256 = <U256>::from(liquidity)
         .checked_mul(sqrt_price_diff.into())
         .ok_or(ARITHMETIC_OVERFLOW)?;
@@ -110,6 +113,8 @@ pub fn try_get_next_sqrt_price_from_a(
     let current_sqrt_price: u128 = current_sqrt_price.into();
     let current_liquidity: u128 = current_liquidity.into();
 
+    crate::counters::record_u256_mul(current_sqrt_price, amount.into());
+    crate::counters::record_u256_mul(current_liquidity, current_sqrt_price);
     let p = <U256>::from(current_sqrt_price)
         .checked_mul(amount.into())
         .ok_or(ARITHMETIC_OVERFLOW)?;

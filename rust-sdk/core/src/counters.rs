@@ -94,7 +94,21 @@ pub struct SwapCounters {
     /// `num_dividend_words - num_divisor_words + 1` outer iterations they perform.
     pub u256_div_knuth_calls: u32,
     pub u256_div_knuth_iters: u32,
+    /// `u128` divisions in the fee helpers, a different and much cheaper primitive.
     pub u128_divs: u32,
+
+    // ---- U256 multiplies ---------------------------------------------------------------
+    //
+    // The on-chain `U256Muldiv::mul` is a schoolbook product whose inner loop runs `m * n`
+    // times for operands of `m` and `n` 64-bit limbs — so a 128-bit operand costs twice a
+    // 64-bit one, and two of them four times. Every price and amount step performs two or
+    // three of these on the pool's liquidity and sqrt prices, which is why two pools with
+    // identical walks can have different per-sub-step costs.
+    /// U256 multiplies performed.
+    pub u256_muls: u32,
+    /// Summed `m * n` over those multiplies — the inner-loop trip count, 1..=4 here since
+    /// both operands are `u128`.
+    pub u256_mul_word_products: u32,
 }
 
 impl SwapCounters {
@@ -119,6 +133,8 @@ impl SwapCounters {
         u256_div_knuth_calls: 0,
         u256_div_knuth_iters: 0,
         u128_divs: 0,
+        u256_muls: 0,
+        u256_mul_word_products: 0,
     };
 
     /// Field-wise `self - base`, for turning two snapshots into the work done between them.
@@ -155,6 +171,10 @@ impl SwapCounters {
             u256_div_knuth_calls: self.u256_div_knuth_calls.saturating_sub(base.u256_div_knuth_calls),
             u256_div_knuth_iters: self.u256_div_knuth_iters.saturating_sub(base.u256_div_knuth_iters),
             u128_divs: self.u128_divs.saturating_sub(base.u128_divs),
+            u256_muls: self.u256_muls.saturating_sub(base.u256_muls),
+            u256_mul_word_products: self
+                .u256_mul_word_products
+                .saturating_sub(base.u256_mul_word_products),
         }
     }
 }
@@ -220,6 +240,26 @@ pub(crate) fn record_u256_div(num_bits: u32, den_bits: u32) {
                 c.u256_div_knuth_calls += 1;
                 c.u256_div_knuth_iters += nd - dv + 1;
             }
+        });
+    }
+}
+
+/// Record one U256 multiply with its operands' limb widths.
+///
+/// The chain's `U256Muldiv::mul` runs its inner loop `m * n` times for `m`- and `n`-limb
+/// operands (`programs/whirlpool/src/math/u256_math.rs`), so the trip count — not the call
+/// count — is the quantity a cost model wants. Both operands here are `u128`, so each is
+/// one or two limbs and the product is 1, 2 or 4.
+#[inline(always)]
+#[allow(unused_variables)]
+pub(crate) fn record_u256_mul(a: u128, b: u128) {
+    #[cfg(feature = "cu-counters")]
+    {
+        let m = (128 - a.leading_zeros()).div_ceil(64).max(1);
+        let n = (128 - b.leading_zeros()).div_ceil(64).max(1);
+        bump(|c| {
+            c.u256_muls += 1;
+            c.u256_mul_word_products += m * n;
         });
     }
 }
