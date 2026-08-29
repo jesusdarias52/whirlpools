@@ -109,6 +109,18 @@ pub struct SwapCounters {
     /// Summed `m * n` over those multiplies — the inner-loop trip count, 1..=4 here since
     /// both operands are `u128`.
     pub u256_mul_word_products: u32,
+
+    // ---- which token math ran ----------------------------------------------------------
+    //
+    // A sub-step calls a different mix of these depending on branches inside
+    // `compute_swap_step` — whether the step reached its target, whether the initial fixed
+    // delta overflowed — and the four are not equal work: `amount_delta_a` performs a U256
+    // division where `amount_delta_b` is a shift. Counting the calls subsumes those branches
+    // without a model of them.
+    pub amount_delta_a_calls: u32,
+    pub amount_delta_b_calls: u32,
+    pub next_sqrt_from_a_calls: u32,
+    pub next_sqrt_from_b_calls: u32,
 }
 
 impl SwapCounters {
@@ -135,6 +147,10 @@ impl SwapCounters {
         u128_divs: 0,
         u256_muls: 0,
         u256_mul_word_products: 0,
+        amount_delta_a_calls: 0,
+        amount_delta_b_calls: 0,
+        next_sqrt_from_a_calls: 0,
+        next_sqrt_from_b_calls: 0,
     };
 
     /// Field-wise `self - base`, for turning two snapshots into the work done between them.
@@ -175,6 +191,18 @@ impl SwapCounters {
             u256_mul_word_products: self
                 .u256_mul_word_products
                 .saturating_sub(base.u256_mul_word_products),
+            amount_delta_a_calls: self
+                .amount_delta_a_calls
+                .saturating_sub(base.amount_delta_a_calls),
+            amount_delta_b_calls: self
+                .amount_delta_b_calls
+                .saturating_sub(base.amount_delta_b_calls),
+            next_sqrt_from_a_calls: self
+                .next_sqrt_from_a_calls
+                .saturating_sub(base.next_sqrt_from_a_calls),
+            next_sqrt_from_b_calls: self
+                .next_sqrt_from_b_calls
+                .saturating_sub(base.next_sqrt_from_b_calls),
         }
     }
 }

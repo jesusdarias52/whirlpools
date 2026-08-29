@@ -25,6 +25,7 @@ pub fn try_get_amount_delta_a(
     liquidity: U128,
     round_up: bool,
 ) -> Result<u64, CoreError> {
+    crate::counters::bump(|c| c.amount_delta_a_calls += 1);
     let (sqrt_price_lower, sqrt_price_upper) =
         order_prices(sqrt_price_1.into(), sqrt_price_2.into());
     let sqrt_price_diff = sqrt_price_upper - sqrt_price_lower;
@@ -73,6 +74,7 @@ pub fn try_get_amount_delta_b(
     liquidity: U128,
     round_up: bool,
 ) -> Result<u64, CoreError> {
+    crate::counters::bump(|c| c.amount_delta_b_calls += 1);
     let (sqrt_price_lower, sqrt_price_upper) =
         order_prices(sqrt_price_1.into(), sqrt_price_2.into());
     let sqrt_price_diff = sqrt_price_upper - sqrt_price_lower;
@@ -107,6 +109,7 @@ pub fn try_get_next_sqrt_price_from_a(
     amount: u64,
     specified_input: bool,
 ) -> Result<U128, CoreError> {
+    crate::counters::bump(|c| c.next_sqrt_from_a_calls += 1);
     if amount == 0 {
         return Ok(current_sqrt_price);
     }
@@ -170,6 +173,7 @@ pub fn try_get_next_sqrt_price_from_b(
     amount: u64,
     specified_input: bool,
 ) -> Result<U128, CoreError> {
+    crate::counters::bump(|c| c.next_sqrt_from_b_calls += 1);
     if amount == 0 {
         return Ok(current_sqrt_price);
     }
