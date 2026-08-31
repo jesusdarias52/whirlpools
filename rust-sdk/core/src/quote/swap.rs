@@ -237,6 +237,20 @@ pub fn compute_swap(
         return Err(INVALID_ADAPTIVE_FEE_INFO);
     }
 
+    // Snapshotted rather than zeroed: the counters are a thread-local, so subtracting a
+    // baseline is what makes a nested or repeated call report only its own work.
+    //
+    // **Taken BEFORE `FeeRateManager::new`, and that placement is load-bearing.** Construction
+    // calls `tick_index_to_sqrt_price` for each core tick-group bound that is inside the tick
+    // range, i.e. up to two positive- or negative-ladder calls per swap. Snapshotting after the
+    // constructor hid them: `ladder_pos_ops` then reported the loop's ladder work only, so a
+    // consumer reconstructing the *whole* swap's ladder read a constant excess exactly equal to
+    // its own core-boundary term — which reads as the consumer over-counting rather than as the
+    // counter under-reporting, and inverts which subgroup looks broken in any cross-tab that
+    // does not subtract it. Nothing else runs between the two points, so moving it up only ever
+    // adds the constructor's own work.
+    let counters_at_entry = crate::counters::snapshot();
+
     let mut fee_rate_manager = FeeRateManager::new(
         a_to_b,
         whirlpool.tick_current_index, // note:  -1 shift is acceptable
@@ -244,10 +258,6 @@ pub fn compute_swap(
         base_fee_rate,
         &adaptive_fee_info,
     )?;
-
-    // Snapshotted rather than zeroed: the counters are a thread-local, so subtracting a
-    // baseline is what makes a nested or repeated call report only its own work.
-    let counters_at_entry = crate::counters::snapshot();
 
     while amount_remaining > 0 && sqrt_price_limit != current_sqrt_price {
         crate::counters::bump(|c| c.tick_steps += 1);
