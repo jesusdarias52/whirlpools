@@ -210,14 +210,31 @@ impl SwapCounters {
 #[cfg(feature = "cu-counters")]
 mod imp {
     use super::SwapCounters;
-    use core::cell::RefCell;
+    use core::cell::{Cell, RefCell};
 
     thread_local! {
         static COUNTERS: RefCell<SwapCounters> = const { RefCell::new(SwapCounters::ZERO) };
+        /// Whether this thread is counting. **Off by default** — see [`super::set_enabled`].
+        static ENABLED: Cell<bool> = const { Cell::new(false) };
+    }
+
+    #[inline]
+    pub fn set_enabled(on: bool) -> bool {
+        ENABLED.try_with(|e| e.replace(on)).unwrap_or(false)
+    }
+
+    #[inline]
+    pub fn enabled() -> bool {
+        ENABLED.try_with(|e| e.get()).unwrap_or(false)
     }
 
     #[inline]
     pub fn bump(f: impl FnOnce(&mut SwapCounters)) {
+        // One thread-local read and a predictable branch is the whole cost when a caller
+        // has not asked to be counted; the `RefCell` behind it is never touched.
+        if !enabled() {
+            return;
+        }
         // A failed borrow would mean a counter bump reentered from inside another bump,
         // which cannot happen: the closures only touch integers.
         let _ = COUNTERS.try_with(|c| {
@@ -253,9 +270,11 @@ mod imp {
 pub(crate) fn record_u256_div(num_bits: u32, den_bits: u32) {
     #[cfg(feature = "cu-counters")]
     {
-        let nd = num_bits.div_ceil(64);
-        let dv = den_bits.div_ceil(64);
+        // Classified inside the closure, so a caller that is not counting pays one
+        // thread-local read and nothing else -- not the width arithmetic as well.
         bump(|c| {
+            let nd = num_bits.div_ceil(64);
+            let dv = den_bits.div_ceil(64);
             c.u256_divs += 1;
             if nd == 0 || nd < dv {
                 c.u256_div_trivial += 1;
@@ -283,17 +302,65 @@ pub(crate) fn record_u256_div(num_bits: u32, den_bits: u32) {
 pub(crate) fn record_u256_mul(a: u128, b: u128) {
     #[cfg(feature = "cu-counters")]
     {
-        let m = (128 - a.leading_zeros()).div_ceil(64).max(1);
-        let n = (128 - b.leading_zeros()).div_ceil(64).max(1);
         bump(|c| {
+            let m = (128 - a.leading_zeros()).div_ceil(64).max(1);
+            let n = (128 - b.leading_zeros()).div_ceil(64).max(1);
             c.u256_muls += 1;
             c.u256_mul_word_products += m * n;
         });
     }
 }
 
+/// Turn counting on or off **for the calling thread**, returning the previous setting.
+///
+/// Off by default, and that default is the point. The bumps sit inside `compute_swap`, which
+/// a caller's optimizer runs 20-40 times per hop while searching for a trade size — but a cost
+/// model only needs the counts once, for the size it finally picks. Compiling the feature in
+/// and leaving this off costs one thread-local read and a predictable branch per bump site
+/// (measured at ~0 against a 190 ns swap); leaving it *on* costs ~16% of that swap.
+///
+/// So the intended shape is a scope, not a global:
+///
+/// ```ignore
+/// let prev = set_enabled(true);
+/// let res = compute_swap(..)?;      // the one call whose work we want to price
+/// set_enabled(prev);
+/// let counts = res.counters;        // exact, not reconstructed
+/// ```
+///
+/// Restore the previous value rather than unconditionally disabling, so a nested scope cannot
+/// switch counting off underneath the caller that turned it on.
+///
+/// A no-op returning `false` without the `cu-counters` feature.
+#[inline(always)]
+#[allow(unused_variables)]
+pub fn set_enabled(on: bool) -> bool {
+    #[cfg(feature = "cu-counters")]
+    {
+        imp::set_enabled(on)
+    }
+    #[cfg(not(feature = "cu-counters"))]
+    {
+        false
+    }
+}
+
+/// Whether the calling thread is counting. Always `false` without the `cu-counters` feature,
+/// which is what lets a caller assert it is actually measuring rather than reading zeros.
+#[inline(always)]
+pub fn enabled() -> bool {
+    #[cfg(feature = "cu-counters")]
+    {
+        imp::enabled()
+    }
+    #[cfg(not(feature = "cu-counters"))]
+    {
+        false
+    }
+}
+
 /// Record work against the calling thread's counters. Compiles to nothing without the
-/// `cu-counters` feature.
+/// `cu-counters` feature, and to one thread-local read plus a branch when counting is off.
 #[inline(always)]
 #[allow(unused_variables)]
 pub(crate) fn bump(f: impl FnOnce(&mut SwapCounters)) {
@@ -320,9 +387,12 @@ mod tests {
     use crate::{sqrt_price_to_tick_index, tick_index_to_sqrt_price, MAX_TICK_INDEX, MIN_TICK_INDEX};
 
     fn measure(f: impl FnOnce()) -> SwapCounters {
+        let prev = set_enabled(true);
         let before = snapshot();
         f();
-        snapshot().since(&before)
+        let out = snapshot().since(&before);
+        set_enabled(prev);
+        out
     }
 
     /// The ladders branch on bits 2,4,8,... of `|tick|`, with bit 1 selecting the seed

@@ -11,7 +11,7 @@ mod quote;
 mod types;
 
 pub use constants::*;
-pub use counters::SwapCounters;
+pub use counters::{set_enabled as set_swap_counters_enabled, enabled as swap_counters_enabled, SwapCounters};
 pub use math::*;
 pub use quote::*;
 pub use types::*;
