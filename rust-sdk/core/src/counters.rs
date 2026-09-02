@@ -94,6 +94,11 @@ pub struct SwapCounters {
     /// `num_dividend_words - num_divisor_words + 1` outer iterations they perform.
     pub u256_div_knuth_calls: u32,
     pub u256_div_knuth_iters: u32,
+    /// Case-2 divisions that are a `U256Muldiv::div` **frame** on chain — the `delta_a` and
+    /// `from_a` divisions, whose `mul_div` never reaches `div_loop`'s set-up when the dividend
+    /// fits two limbs — as opposed to the b-side price solve, which this SDK divides as a U256
+    /// but the chain as an inline `u128`. A cost model prices the frame's own work by this.
+    pub u256_div_case2_frames: u32,
     /// Every `__udivti3` call the chain's `U256Muldiv::div` makes — the quotient steps of cases 3
     /// and 4 (`d0 / d1` in `div_loop`, `d1 / d2` in the single-limb loop) and case 2's one
     /// `u128 / u128` — as a histogram over the **branch path** compiler-builtins' `trifecta`
@@ -165,6 +170,7 @@ impl SwapCounters {
         u256_div_short_iters: 0,
         u256_div_knuth_calls: 0,
         u256_div_knuth_iters: 0,
+        u256_div_case2_frames: 0,
         udiv_paths: [0; UDIV_PATHS],
         u256_div_normalized: 0,
         u256_div_qhat_corrections: 0,
@@ -210,6 +216,9 @@ impl SwapCounters {
             u256_div_short_iters: self.u256_div_short_iters.saturating_sub(base.u256_div_short_iters),
             u256_div_knuth_calls: self.u256_div_knuth_calls.saturating_sub(base.u256_div_knuth_calls),
             u256_div_knuth_iters: self.u256_div_knuth_iters.saturating_sub(base.u256_div_knuth_iters),
+            u256_div_case2_frames: self
+                .u256_div_case2_frames
+                .saturating_sub(base.u256_div_case2_frames),
             udiv_paths: {
                 let mut p = [0u32; UDIV_PATHS];
                 for (i, slot) in p.iter_mut().enumerate() {
@@ -302,7 +311,7 @@ mod imp {
 /// are handed the same operands, and it is the operands that select the chain's branch.
 #[inline(always)]
 #[allow(unused_variables)]
-pub(crate) fn record_u256_div(numerator: ethnum::U256, denominator: ethnum::U256) {
+pub(crate) fn record_u256_div(numerator: ethnum::U256, denominator: ethnum::U256, frame: bool) {
     #[cfg(feature = "cu-counters")]
     {
         // Classified inside the closure, so a caller that is not counting pays one
@@ -317,6 +326,9 @@ pub(crate) fn record_u256_div(numerator: ethnum::U256, denominator: ethnum::U256
                 c.u256_div_trivial += 1;
             } else if nd < 3 {
                 c.u256_div_u128 += 1;
+                if frame {
+                    c.u256_div_case2_frames += 1;
+                }
                 // Case 2: one native `u128 / u128`, which on SBF is one `__udivti3` call.
                 let (num, den) = (limbs(numerator), limbs(denominator));
                 let num = num[0] as u128 | (num[1] as u128) << 64;
