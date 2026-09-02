@@ -598,6 +598,45 @@ pub(crate) fn chain_div_arms(dividend: [u64; 4], divisor: [u64; 4]) -> ([u64; 4]
     (quotient, arms)
 }
 
+/// One `u128 / u128` the chain performs, classified by the branch path [`udiv_path`] says it
+/// takes — with the operands **as the chain computes them**, which is not always how this SDK
+/// does: the step fee on a max-swap step is `amount_in * fee_rate / (1e6 - fee_rate)` on chain and
+/// `amount_in * 1e6 / (1e6 - fee_rate)` here, and the two dividends can land on different paths.
+#[inline(always)]
+#[allow(unused_variables)]
+pub(crate) fn record_udiv(numerator: u128, denominator: u128) {
+    #[cfg(feature = "cu-counters")]
+    {
+        if denominator != 0 {
+            bump(|c| c.udiv_paths[udiv_path(numerator, denominator)] += 1);
+        }
+    }
+}
+
+/// The two divisions the chain's `swap_manager::calculate_fees` performs after every step and
+/// this SDK never needs — the protocol fee `fee * protocol_fee_rate / 10_000` (when the rate is
+/// set) and the fee-growth update `(fee - protocol_fee) << 64 / liquidity` (when there is
+/// liquidity), the latter with the pre-crossing liquidity, as the chain does it. Computed here
+/// only to be classified, and only while counting.
+#[inline(always)]
+#[allow(unused_variables)]
+pub(crate) fn record_step_fees(fee_amount: u64, protocol_fee_rate: u16, liquidity: u128) {
+    #[cfg(feature = "cu-counters")]
+    {
+        bump(|c| {
+            let mut global_fee = fee_amount as u128;
+            if protocol_fee_rate > 0 {
+                let numerator = global_fee * protocol_fee_rate as u128;
+                c.udiv_paths[udiv_path(numerator, 10_000)] += 1;
+                global_fee -= numerator / 10_000;
+            }
+            if liquidity > 0 {
+                c.udiv_paths[udiv_path(global_fee << 64, liquidity)] += 1;
+            }
+        });
+    }
+}
+
 /// Record one U256 multiply with its operands' limb widths.
 ///
 /// The chain's `U256Muldiv::mul` runs its inner loop `m * n` times for `m`- and `n`-limb

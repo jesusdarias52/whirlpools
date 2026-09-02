@@ -369,12 +369,13 @@ impl FeeRateManager {
 
         let squared = u64::from(crossed) * u64::from(crossed);
 
-        let fee_rate = ceil_division_u128(
-            u128::from(adaptive_fee_constants.adaptive_fee_control_factor) * u128::from(squared),
-            u128::from(ADAPTIVE_FEE_CONTROL_FACTOR_DENOMINATOR)
-                * u128::from(VOLATILITY_ACCUMULATOR_SCALE_FACTOR)
-                * u128::from(VOLATILITY_ACCUMULATOR_SCALE_FACTOR),
-        );
+        let numerator =
+            u128::from(adaptive_fee_constants.adaptive_fee_control_factor) * u128::from(squared);
+        let denominator = u128::from(ADAPTIVE_FEE_CONTROL_FACTOR_DENOMINATOR)
+            * u128::from(VOLATILITY_ACCUMULATOR_SCALE_FACTOR)
+            * u128::from(VOLATILITY_ACCUMULATOR_SCALE_FACTOR);
+        crate::counters::record_udiv(numerator, denominator);
+        let fee_rate = ceil_division_u128(numerator, denominator);
 
         if fee_rate > FEE_RATE_HARD_LIMIT as u128 {
             FEE_RATE_HARD_LIMIT

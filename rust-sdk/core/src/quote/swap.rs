@@ -1,4 +1,4 @@
-use crate::{sqrt_price_to_tick_index, tick_index_to_sqrt_price, try_apply_swap_fee, try_apply_transfer_fee, try_get_amount_delta_a, try_get_amount_delta_b, try_get_max_amount_with_slippage_tolerance, try_get_min_amount_with_slippage_tolerance, try_get_next_sqrt_price_from_a, try_get_next_sqrt_price_from_b, try_reverse_apply_swap_fee, try_reverse_apply_transfer_fee, AdaptiveFeeInfo, CoreError, ExactInSwapQuote, ExactOutSwapQuote, FeeRateManager, OracleFacade, TickArraySequence, TickArrays, TickFacade, TransferFee, WhirlpoolFacade, AMOUNT_EXCEEDS_MAX_U64, ARITHMETIC_OVERFLOW, INVALID_ADAPTIVE_FEE_INFO, INVALID_SQRT_PRICE_LIMIT_DIRECTION, LIQUIDITY_OVERFLOW, MAX_SQRT_PRICE, MIN_SQRT_PRICE, SQRT_PRICE_LIMIT_OUT_OF_BOUNDS, ZERO_TRADABLE_AMOUNT};
+use crate::{sqrt_price_to_tick_index, tick_index_to_sqrt_price, FEE_RATE_DENOMINATOR, try_apply_swap_fee, try_apply_transfer_fee, try_get_amount_delta_a, try_get_amount_delta_b, try_get_max_amount_with_slippage_tolerance, try_get_min_amount_with_slippage_tolerance, try_get_next_sqrt_price_from_a, try_get_next_sqrt_price_from_b, try_reverse_apply_swap_fee, try_reverse_apply_transfer_fee, AdaptiveFeeInfo, CoreError, ExactInSwapQuote, ExactOutSwapQuote, FeeRateManager, OracleFacade, TickArraySequence, TickArrays, TickFacade, TransferFee, WhirlpoolFacade, AMOUNT_EXCEEDS_MAX_U64, ARITHMETIC_OVERFLOW, INVALID_ADAPTIVE_FEE_INFO, INVALID_SQRT_PRICE_LIMIT_DIRECTION, LIQUIDITY_OVERFLOW, MAX_SQRT_PRICE, MIN_SQRT_PRICE, SQRT_PRICE_LIMIT_OUT_OF_BOUNDS, ZERO_TRADABLE_AMOUNT};
 
 #[cfg(feature = "wasm")]
 use orca_whirlpools_macros::wasm_expose;
@@ -310,6 +310,11 @@ pub fn compute_swap(
             )?;
 
             trade_fee += step_quote.fee_amount;
+            crate::counters::record_step_fees(
+                step_quote.fee_amount,
+                whirlpool.protocol_fee_rate,
+                current_liquidity,
+            );
 
             if specified_input {
                 amount_remaining = amount_remaining
@@ -447,6 +452,11 @@ fn compute_swap_step(
         initial_amount_fixed_delta == Err(AMOUNT_EXCEEDS_MAX_U64);
 
     let amount_calculated = if specified_input {
+        // The chain's `checked_mul_div(amount, 1e6 - fee_rate, 1e6)`, same operands.
+        crate::counters::record_udiv(
+            u128::from(amount_remaining) * (u128::from(FEE_RATE_DENOMINATOR) - u128::from(fee_rate)),
+            u128::from(FEE_RATE_DENOMINATOR),
+        );
         try_apply_swap_fee(amount_remaining.into(), fee_rate)?
     } else {
         amount_remaining
@@ -502,6 +512,12 @@ fn compute_swap_step(
     let fee_amount = if specified_input && !is_max_swap {
         amount_remaining - amount_in
     } else {
+        // The chain's `checked_mul_div_round_up(amount_in, fee_rate, 1e6 - fee_rate)`: its
+        // operands, not `try_reverse_apply_swap_fee`'s, decide the `__udivti3` path.
+        crate::counters::record_udiv(
+            u128::from(amount_in) * u128::from(fee_rate),
+            u128::from(FEE_RATE_DENOMINATOR) - u128::from(fee_rate),
+        );
         let pre_fee_amount = try_reverse_apply_swap_fee(amount_in.into(), fee_rate)?;
         pre_fee_amount - amount_in
     };
