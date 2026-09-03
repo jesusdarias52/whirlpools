@@ -95,6 +95,11 @@ pub fn sqrt_price_to_tick_index(sqrt_price: U128) -> i32 {
         c.sqrt_to_tick_calls += 1;
         c.sqrt_to_tick_log2_iters += precision as u32;
         c.sqrt_to_tick_log2_clear_bits += clear_bits;
+        if msb < 63 {
+            c.sqrt_to_tick_shift_left += 1;
+        } else if msb > 63 {
+            c.sqrt_to_tick_shift_right += 1;
+        }
     });
 
     let log2p_fraction_x32 = log2p_fraction_x64 >> 32;

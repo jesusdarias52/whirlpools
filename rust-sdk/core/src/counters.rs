@@ -73,6 +73,11 @@ pub struct SwapCounters {
     /// the variable shift takes `__lshrti3`'s under-64 path, 8 instructions dearer than the
     /// by-64 one, so a refinement costs 8 CU more per clear bit of the price's log2 fraction.
     pub sqrt_to_tick_log2_clear_bits: u32,
+    /// Refinements whose price was narrower / wider than 64 bits, so the initial normalisation
+    /// of `r` shifted by a non-zero amount: `__ashlti3` costs 18 against 8 for a zero shift
+    /// (`msb < 63`), and `__lshrti3` 12 (`msb > 63`).
+    pub sqrt_to_tick_shift_left: u32,
+    pub sqrt_to_tick_shift_right: u32,
 
     // ---- U256 divisions ----------------------------------------------------------------
     //
@@ -116,6 +121,9 @@ pub struct SwapCounters {
     /// Case-4 divisions whose divisor's top limb had leading zeros, so both operands were shifted
     /// left before the loop (Knuth D's normalisation) — a per-limb shift the other cases skip.
     pub u256_div_normalized: u32,
+    /// Of those, the divisions whose caller keeps the remainder (a round-up), which the chain
+    /// then shifts back right — a 21-instruction block the round-down callers never run.
+    pub u256_div_normalized_remainder: u32,
     /// Iterations of `div_loop`'s `qhat` correction loop (`qhat` over-estimated by one or two).
     pub u256_div_qhat_corrections: u32,
     /// `u128` divisions in the fee helpers, a different and much cheaper primitive.
@@ -168,6 +176,8 @@ impl SwapCounters {
         sqrt_to_tick_log2_iters: 0,
         sqrt_to_tick_refines: 0,
         sqrt_to_tick_log2_clear_bits: 0,
+        sqrt_to_tick_shift_left: 0,
+        sqrt_to_tick_shift_right: 0,
         u256_divs: 0,
         u256_div_trivial: 0,
         u256_div_u128: 0,
@@ -178,6 +188,7 @@ impl SwapCounters {
         u256_div_case2_frames: 0,
         udiv_paths: [0; UDIV_PATHS],
         u256_div_normalized: 0,
+        u256_div_normalized_remainder: 0,
         u256_div_qhat_corrections: 0,
         u128_divs: 0,
         u256_muls: 0,
@@ -217,6 +228,12 @@ impl SwapCounters {
             sqrt_to_tick_log2_clear_bits: self
                 .sqrt_to_tick_log2_clear_bits
                 .saturating_sub(base.sqrt_to_tick_log2_clear_bits),
+            sqrt_to_tick_shift_left: self
+                .sqrt_to_tick_shift_left
+                .saturating_sub(base.sqrt_to_tick_shift_left),
+            sqrt_to_tick_shift_right: self
+                .sqrt_to_tick_shift_right
+                .saturating_sub(base.sqrt_to_tick_shift_right),
             u256_divs: self.u256_divs.saturating_sub(base.u256_divs),
             u256_div_trivial: self.u256_div_trivial.saturating_sub(base.u256_div_trivial),
             u256_div_u128: self.u256_div_u128.saturating_sub(base.u256_div_u128),
@@ -235,6 +252,9 @@ impl SwapCounters {
                 p
             },
             u256_div_normalized: self.u256_div_normalized.saturating_sub(base.u256_div_normalized),
+            u256_div_normalized_remainder: self
+                .u256_div_normalized_remainder
+                .saturating_sub(base.u256_div_normalized_remainder),
             u256_div_qhat_corrections: self
                 .u256_div_qhat_corrections
                 .saturating_sub(base.u256_div_qhat_corrections),
@@ -319,7 +339,12 @@ mod imp {
 /// are handed the same operands, and it is the operands that select the chain's branch.
 #[inline(always)]
 #[allow(unused_variables)]
-pub(crate) fn record_u256_div(numerator: ethnum::U256, denominator: ethnum::U256, frame: bool) {
+pub(crate) fn record_u256_div(
+    numerator: ethnum::U256,
+    denominator: ethnum::U256,
+    frame: bool,
+    remainder: bool,
+) {
     #[cfg(feature = "cu-counters")]
     {
         // Classified inside the closure, so a caller that is not counting pays one
@@ -355,6 +380,9 @@ pub(crate) fn record_u256_div(numerator: ethnum::U256, denominator: ethnum::U256
                     *slot += n;
                 }
                 c.u256_div_normalized += arms.normalized;
+                if remainder {
+                    c.u256_div_normalized_remainder += arms.normalized;
+                }
                 c.u256_div_qhat_corrections += arms.corrections;
             }
         });

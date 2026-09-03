@@ -41,7 +41,7 @@ pub fn try_get_amount_delta_a(
         .checked_mul(sqrt_price_upper.into())
         .ok_or(ARITHMETIC_OVERFLOW)?;
 
-    crate::counters::record_u256_div(numerator, denominator, true);
+    crate::counters::record_u256_div(numerator, denominator, true, round_up);
     let quotient = numerator / denominator;
     let remainder = numerator % denominator;
 
@@ -133,7 +133,8 @@ pub fn try_get_next_sqrt_price_from_a(
         current_liquidity_shifted - p
     };
 
-    crate::counters::record_u256_div(numerator, denominator, true);
+    // The chain rounds this one up unconditionally, so it keeps (and shifts back) the remainder.
+    crate::counters::record_u256_div(numerator, denominator, true, true);
     let quotient: U256 = numerator / denominator;
     let remainder: U256 = numerator % denominator;
 
@@ -178,7 +179,7 @@ pub fn try_get_next_sqrt_price_from_b(
         .ok_or(ARITHMETIC_OVERFLOW)?;
 
     // Divided as a U256 here and as an inline `u128` on chain: not a `mul_div` frame.
-    crate::counters::record_u256_div(amount_shifted, current_liquidity, false);
+    crate::counters::record_u256_div(amount_shifted, current_liquidity, false, false);
     let quotient: U256 = amount_shifted / current_liquidity;
     let remainder: U256 = amount_shifted % current_liquidity;
 
