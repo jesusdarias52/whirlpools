@@ -69,6 +69,10 @@ pub struct SwapCounters {
     /// `tick_index_to_sqrt_price` to break the tie. That nested call is *also* counted in
     /// the ladder fields above, as it should be — it is work that ran.
     pub sqrt_to_tick_refines: u32,
+    /// Log2 iterations whose fraction bit came out **clear** (`r >>= 63` rather than `>>= 64`):
+    /// the variable shift takes `__lshrti3`'s under-64 path, 8 instructions dearer than the
+    /// by-64 one, so a refinement costs 8 CU more per clear bit of the price's log2 fraction.
+    pub sqrt_to_tick_log2_clear_bits: u32,
 
     // ---- U256 divisions ----------------------------------------------------------------
     //
@@ -163,6 +167,7 @@ impl SwapCounters {
         sqrt_to_tick_calls: 0,
         sqrt_to_tick_log2_iters: 0,
         sqrt_to_tick_refines: 0,
+        sqrt_to_tick_log2_clear_bits: 0,
         u256_divs: 0,
         u256_div_trivial: 0,
         u256_div_u128: 0,
@@ -209,6 +214,9 @@ impl SwapCounters {
             sqrt_to_tick_refines: self
                 .sqrt_to_tick_refines
                 .saturating_sub(base.sqrt_to_tick_refines),
+            sqrt_to_tick_log2_clear_bits: self
+                .sqrt_to_tick_log2_clear_bits
+                .saturating_sub(base.sqrt_to_tick_log2_clear_bits),
             u256_divs: self.u256_divs.saturating_sub(base.u256_divs),
             u256_div_trivial: self.u256_div_trivial.saturating_sub(base.u256_div_trivial),
             u256_div_u128: self.u256_div_u128.saturating_sub(base.u256_div_u128),

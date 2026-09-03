@@ -69,6 +69,7 @@ pub fn sqrt_price_to_tick_index(sqrt_price: U128) -> i32 {
     let mut bit: i128 = 0x8000_0000_0000_0000i128;
     let mut precision = 0;
     let mut log2p_fraction_x64 = 0;
+    let mut clear_bits: u32 = 0;
 
     // Log2 iterative approximation for the fractional part
     // Go through each 2^(j) bit where j < 64 in a Q64.64 number
@@ -83,6 +84,7 @@ pub fn sqrt_price_to_tick_index(sqrt_price: U128) -> i32 {
         r *= r;
         let is_r_more_than_two = r >> 127_u32;
         r >>= 63 + is_r_more_than_two;
+        clear_bits += 1 - is_r_more_than_two as u32;
         log2p_fraction_x64 += bit * is_r_more_than_two as i128;
         bit >>= 1;
         precision += 1;
@@ -92,6 +94,7 @@ pub fn sqrt_price_to_tick_index(sqrt_price: U128) -> i32 {
     crate::counters::bump(|c| {
         c.sqrt_to_tick_calls += 1;
         c.sqrt_to_tick_log2_iters += precision as u32;
+        c.sqrt_to_tick_log2_clear_bits += clear_bits;
     });
 
     let log2p_fraction_x32 = log2p_fraction_x64 >> 32;
