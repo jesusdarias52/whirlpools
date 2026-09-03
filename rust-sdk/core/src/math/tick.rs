@@ -100,6 +100,12 @@ pub fn sqrt_price_to_tick_index(sqrt_price: U128) -> i32 {
         } else if msb > 63 {
             c.sqrt_to_tick_shift_right += 1;
         }
+        // `u128::leading_zeros` has no SBF instruction behind it: the compiled form tests the
+        // high limb and takes a longer path when it is zero, so a price under 2^64 costs the
+        // conversion more before the log2 loop even starts.
+        if msb < 64 {
+            c.sqrt_to_tick_narrow += 1;
+        }
     });
 
     let log2p_fraction_x32 = log2p_fraction_x64 >> 32;
@@ -116,8 +122,15 @@ pub fn sqrt_price_to_tick_index(sqrt_price: U128) -> i32 {
         tick_low
     } else {
         // The tie-break below runs a further `tick_index_to_sqrt_price`, which that
-        // ladder counts for itself — this only records that the branch was taken.
-        crate::counters::bump(|c| c.sqrt_to_tick_refines += 1);
+        // ladder counts for itself — this records that the branch was taken, and which
+        // ladder body it will take: `tick_high`'s sign decides, and the two bodies cost
+        // an order of magnitude apart (a flat ~1,000 against ~248 per set bit).
+        crate::counters::bump(|c| {
+            c.sqrt_to_tick_refines += 1;
+            if tick_high < 0 {
+                c.sqrt_to_tick_refines_neg += 1;
+            }
+        });
         // If our estimation for tick_high returns a lower sqrt_price than the input
         // then the actual tick_high has to be higher than tick_high.
         // Otherwise, the actual value is between tick_low & tick_high, so a floor value

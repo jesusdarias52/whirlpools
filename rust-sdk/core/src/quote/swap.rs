@@ -198,6 +198,7 @@ pub fn compute_swap(
     timestamp: u64,
     adaptive_fee_info: Option<AdaptiveFeeInfo>,
 ) -> Result<SwapResult, CoreError> {
+
     let sqrt_price_limit = if sqrt_price_limit == 0 {
         if a_to_b {
             MIN_SQRT_PRICE

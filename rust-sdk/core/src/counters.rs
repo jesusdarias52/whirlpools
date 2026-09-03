@@ -78,6 +78,13 @@ pub struct SwapCounters {
     /// (`msb < 63`), and `__lshrti3` 12 (`msb > 63`).
     pub sqrt_to_tick_shift_left: u32,
     pub sqrt_to_tick_shift_right: u32,
+    /// Of `sqrt_to_tick_refines`, the ones whose `tick_high` is negative, so the tie-break's
+    /// nested ladder call takes the negative body (a flat ~1,000) rather than the positive
+    /// one (~248 per set bit, those bits being in `ladder_pos_ops`).
+    pub sqrt_to_tick_refines_neg: u32,
+    /// Conversions of a price under 2^64: `u128::leading_zeros` has no SBF instruction and
+    /// its compiled form takes a longer path when the high limb is zero.
+    pub sqrt_to_tick_narrow: u32,
 
     // ---- U256 divisions ----------------------------------------------------------------
     //
@@ -175,6 +182,8 @@ impl SwapCounters {
         sqrt_to_tick_calls: 0,
         sqrt_to_tick_log2_iters: 0,
         sqrt_to_tick_refines: 0,
+        sqrt_to_tick_refines_neg: 0,
+        sqrt_to_tick_narrow: 0,
         sqrt_to_tick_log2_clear_bits: 0,
         sqrt_to_tick_shift_left: 0,
         sqrt_to_tick_shift_right: 0,
@@ -225,6 +234,12 @@ impl SwapCounters {
             sqrt_to_tick_refines: self
                 .sqrt_to_tick_refines
                 .saturating_sub(base.sqrt_to_tick_refines),
+            sqrt_to_tick_refines_neg: self
+                .sqrt_to_tick_refines_neg
+                .saturating_sub(base.sqrt_to_tick_refines_neg),
+            sqrt_to_tick_narrow: self
+                .sqrt_to_tick_narrow
+                .saturating_sub(base.sqrt_to_tick_narrow),
             sqrt_to_tick_log2_clear_bits: self
                 .sqrt_to_tick_log2_clear_bits
                 .saturating_sub(base.sqrt_to_tick_log2_clear_bits),

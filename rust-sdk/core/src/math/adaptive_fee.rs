@@ -204,11 +204,15 @@ impl FeeRateManager {
                     // Note: It was pointed out during the review that using curr_tick_index may suppress tick_index_from_sqrt_price.
                     //       However, since curr_tick_index may also be shifted by -1, we decided to prioritize safety by recalculating it here.
                     let tick_index = sqrt_price_to_tick_index(sqrt_price.into());
-                    let sqrt_price_from_tick_index: u128 =
-                        tick_index_to_sqrt_price(tick_index).into();
+                    // Short-circuit, as the deployed program writes it: the ladder call on
+                    // `tick_index` only runs when the tick sits on a tick-group boundary. The
+                    // upstream SDK binds it unconditionally, which quotes identically and
+                    // counts one positive ladder call (the landing tick's popcount in ops)
+                    // the chain never makes — measured on `tohKLXFR7toC` b2a as 12 phantom
+                    // ops at one amount and 4 at another.
                     let is_on_tick_group_boundary =
                         tick_index % adaptive_fee_constants.tick_group_size as i32 == 0
-                            && sqrt_price == sqrt_price_from_tick_index;
+                            && sqrt_price == u128::from(tick_index_to_sqrt_price(tick_index));
                     (tick_index, is_on_tick_group_boundary)
                 };
 
