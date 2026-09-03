@@ -85,6 +85,13 @@ pub struct SwapCounters {
     /// Conversions of a price under 2^64: `u128::leading_zeros` has no SBF instruction and
     /// its compiled form takes a longer path when the high limb is zero.
     pub sqrt_to_tick_narrow: u32,
+    /// `advance_tick_group_after_skip` divides the landing tick by `tick_group_size` twice —
+    /// a `%` and a `floor_division`, both signed 64-bit, so both are shift-subtract loops whose
+    /// cost is `base + 7 per quotient bit + 2 per set bit of the quotient`. Two calls per skip,
+    /// summed here over both, on top of the six every crossing runs. See the bot's
+    /// `ORCA_CUS_PER_TICK_DIV_BASE`.
+    pub skip_tick_div_qbits: u32,
+    pub skip_tick_div_setbits: u32,
 
     // ---- U256 divisions ----------------------------------------------------------------
     //
@@ -184,6 +191,8 @@ impl SwapCounters {
         sqrt_to_tick_refines: 0,
         sqrt_to_tick_refines_neg: 0,
         sqrt_to_tick_narrow: 0,
+        skip_tick_div_qbits: 0,
+        skip_tick_div_setbits: 0,
         sqrt_to_tick_log2_clear_bits: 0,
         sqrt_to_tick_shift_left: 0,
         sqrt_to_tick_shift_right: 0,
@@ -240,6 +249,12 @@ impl SwapCounters {
             sqrt_to_tick_narrow: self
                 .sqrt_to_tick_narrow
                 .saturating_sub(base.sqrt_to_tick_narrow),
+            skip_tick_div_qbits: self
+                .skip_tick_div_qbits
+                .saturating_sub(base.skip_tick_div_qbits),
+            skip_tick_div_setbits: self
+                .skip_tick_div_setbits
+                .saturating_sub(base.skip_tick_div_setbits),
             sqrt_to_tick_log2_clear_bits: self
                 .sqrt_to_tick_log2_clear_bits
                 .saturating_sub(base.sqrt_to_tick_log2_clear_bits),

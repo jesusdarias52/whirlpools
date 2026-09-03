@@ -216,6 +216,17 @@ impl FeeRateManager {
                     (tick_index, is_on_tick_group_boundary)
                 };
 
+                // The two i64 divisions this function performs on the landing tick — the `%`
+                // above (or in the boundary branch) and the `floor_division` below. Counted
+                // for the cost model; both take `tick_index / tick_group_size` as their
+                // quotient. See `SwapCounters::skip_tick_div_qbits`.
+                crate::counters::bump(|c| {
+                    let q = (tick_index / adaptive_fee_constants.tick_group_size as i32)
+                        .unsigned_abs();
+                    c.skip_tick_div_qbits += 2 * (32 - q.leading_zeros());
+                    c.skip_tick_div_setbits += 2 * q.count_ones();
+                });
+
                 let last_traversed_tick_group_index = if is_on_tick_group_boundary && !*a_to_b {
                     // tick_index is on tick group boundary, so this division is safe
                     tick_index / adaptive_fee_constants.tick_group_size as i32 - 1
