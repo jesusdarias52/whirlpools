@@ -379,24 +379,69 @@ impl FeeRateManager {
         adaptive_fee_constants: &AdaptiveFeeConstantsFacade,
         adaptive_fee_variables: &AdaptiveFeeVariablesFacade,
     ) -> u32 {
-        let crossed = adaptive_fee_variables.volatility_accumulator
-            * adaptive_fee_constants.tick_group_size as u32;
-
-        let squared = u64::from(crossed) * u64::from(crossed);
-
-        let numerator =
-            u128::from(adaptive_fee_constants.adaptive_fee_control_factor) * u128::from(squared);
+        // The counter records the division the *program* performs. Split from the arithmetic so
+        // an out-of-crate caller asking "what would the fee be here" (see [`total_fee_rate`])
+        // cannot inflate `udiv` by asking.
+        let numerator = u128::from(adaptive_fee_constants.adaptive_fee_control_factor)
+            * u128::from({
+                let crossed = adaptive_fee_variables.volatility_accumulator
+                    * adaptive_fee_constants.tick_group_size as u32;
+                u64::from(crossed) * u64::from(crossed)
+            });
         let denominator = u128::from(ADAPTIVE_FEE_CONTROL_FACTOR_DENOMINATOR)
             * u128::from(VOLATILITY_ACCUMULATOR_SCALE_FACTOR)
             * u128::from(VOLATILITY_ACCUMULATOR_SCALE_FACTOR);
         crate::counters::record_udiv(numerator, denominator);
-        let fee_rate = ceil_division_u128(numerator, denominator);
+        adaptive_fee_rate_uncounted(adaptive_fee_constants, adaptive_fee_variables)
+    }
+}
 
-        if fee_rate > FEE_RATE_HARD_LIMIT as u128 {
-            FEE_RATE_HARD_LIMIT
-        } else {
-            fee_rate as u32
-        }
+/// The adaptive component of the fee, without recording the division against the CU counters.
+///
+/// Byte-for-byte the arithmetic [`FeeRateManager::compute_adaptive_fee_rate`] performs; that method
+/// is this plus a `record_udiv`, so the two cannot drift.
+fn adaptive_fee_rate_uncounted(
+    adaptive_fee_constants: &AdaptiveFeeConstantsFacade,
+    adaptive_fee_variables: &AdaptiveFeeVariablesFacade,
+) -> u32 {
+    let crossed =
+        adaptive_fee_variables.volatility_accumulator * adaptive_fee_constants.tick_group_size as u32;
+    let squared = u64::from(crossed) * u64::from(crossed);
+    let numerator =
+        u128::from(adaptive_fee_constants.adaptive_fee_control_factor) * u128::from(squared);
+    let denominator = u128::from(ADAPTIVE_FEE_CONTROL_FACTOR_DENOMINATOR)
+        * u128::from(VOLATILITY_ACCUMULATOR_SCALE_FACTOR)
+        * u128::from(VOLATILITY_ACCUMULATOR_SCALE_FACTOR);
+    let fee_rate = ceil_division_u128(numerator, denominator);
+    if fee_rate > FEE_RATE_HARD_LIMIT as u128 {
+        FEE_RATE_HARD_LIMIT
+    } else {
+        fee_rate as u32
+    }
+}
+
+/// **The total fee rate the swap loop would use at a given adaptive state, for callers outside
+/// this crate.**
+///
+/// `FeeRateManager` is `pub(crate)`, so a consumer replaying a swap — a compute-unit model, say —
+/// could not reach `get_total_fee_rate` and had to approximate the fee or drop it. Approximating
+/// it is not viable where the answer feeds a branch: the fee is skimmed at *every* sub-step, so
+/// the error compounds along the walk.
+///
+/// Stateless. The caller supplies the volatility state it has already advanced with
+/// [`AdaptiveFeeVariablesFacade::update_volatility_accumulator`], which is the same function the
+/// loop uses, so the sequence of rates a replay sees is the sequence the program saw.
+pub fn total_fee_rate(
+    static_fee_rate: u16,
+    adaptive_fee_constants: &AdaptiveFeeConstantsFacade,
+    adaptive_fee_variables: &AdaptiveFeeVariablesFacade,
+) -> u32 {
+    let total = static_fee_rate as u32
+        + adaptive_fee_rate_uncounted(adaptive_fee_constants, adaptive_fee_variables);
+    if total > FEE_RATE_HARD_LIMIT {
+        FEE_RATE_HARD_LIMIT
+    } else {
+        total
     }
 }
 
