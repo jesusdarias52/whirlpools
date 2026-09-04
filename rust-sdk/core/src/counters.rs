@@ -117,6 +117,19 @@ pub struct SwapCounters {
     /// `num_dividend_words - num_divisor_words + 1` outer iterations they perform.
     pub u256_div_knuth_calls: u32,
     pub u256_div_knuth_iters: u32,
+    /// **The multiply work *inside* the division, in limb products.**
+    ///
+    /// Knuth D's inner loop multiplies the divisor by the trial quotient digit once per
+    /// iteration, so the multiplies scale with the **divisor's** limb count as well as the
+    /// iteration count — `iterations * dv` for the general arm, one per iteration for the
+    /// short arm where the divisor is a single limb. `u256_mul_word_products` cannot see any
+    /// of this: it is recorded at explicit `U256Muldiv::mul` call sites only.
+    ///
+    /// Separate from `u256_div_knuth_iters` because the two are *not* proportional — `dv`
+    /// varies with the operands — and a flat per-iteration cost therefore cannot express a
+    /// division whose divisor is wide. Measured downstream, one such division's multiplies are
+    /// worth ~750 CU that a per-iteration term charges at zero.
+    pub u256_div_mul_words: u32,
     /// Case-2 divisions that are a `U256Muldiv::div` **frame** on chain — the `delta_a` and
     /// `from_a` divisions, whose `mul_div` never reaches `div_loop`'s set-up when the dividend
     /// fits two limbs — as opposed to the b-side price solve, which this SDK divides as a U256
@@ -203,6 +216,7 @@ impl SwapCounters {
         u256_div_short_iters: 0,
         u256_div_knuth_calls: 0,
         u256_div_knuth_iters: 0,
+        u256_div_mul_words: 0,
         u256_div_case2_frames: 0,
         udiv_paths: [0; UDIV_PATHS],
         u256_div_normalized: 0,
@@ -271,6 +285,7 @@ impl SwapCounters {
             u256_div_short_iters: self.u256_div_short_iters.saturating_sub(base.u256_div_short_iters),
             u256_div_knuth_calls: self.u256_div_knuth_calls.saturating_sub(base.u256_div_knuth_calls),
             u256_div_knuth_iters: self.u256_div_knuth_iters.saturating_sub(base.u256_div_knuth_iters),
+            u256_div_mul_words: self.u256_div_mul_words.saturating_sub(base.u256_div_mul_words),
             u256_div_case2_frames: self
                 .u256_div_case2_frames
                 .saturating_sub(base.u256_div_case2_frames),
@@ -400,9 +415,13 @@ pub(crate) fn record_u256_div(
             } else if dv == 1 {
                 c.u256_div_short_calls += 1;
                 c.u256_div_short_iters += nd;
+                // One limb product per iteration: the divisor is a single limb here.
+                c.u256_div_mul_words += nd;
             } else {
                 c.u256_div_knuth_calls += 1;
                 c.u256_div_knuth_iters += nd - dv + 1;
+                // Knuth D multiplies the whole divisor by the trial digit once per iteration.
+                c.u256_div_mul_words += (nd - dv + 1) * dv;
             }
             if nd >= 3 {
                 let (_, arms) = chain_div_arms(limbs(numerator), limbs(denominator));
