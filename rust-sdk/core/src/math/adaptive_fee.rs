@@ -21,7 +21,7 @@ pub fn is_initialized_with_adaptive_fee(whirlpool: WhirlpoolFacade) -> bool {
     whirlpool.is_initialized_with_adaptive_fee()
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum FeeRateManager {
     Adaptive {
         a_to_b: bool,
@@ -503,6 +503,39 @@ impl AdaptiveFeeVariablesFacade {
         }
 
         Ok(())
+    }
+
+    /// Which outcome [`Self::update_reference`] takes at `current_timestamp` — the same
+    /// comparisons in the same order, so the two cannot drift.
+    ///
+    /// A swap's whole dependence on the clock runs through `update_reference`: within one of its
+    /// outcomes the references it produces are a function of stored state alone, so a quote memo
+    /// or a prefix table keyed on the pool's version **and this branch** is exact, and stays exact
+    /// until the clock crosses into the next one. `0` is the `INVALID_TIMESTAMP` error, `1` the
+    /// reset past `MAX_REFERENCE_AGE`, `2` the high-frequency no-op, `3` the reduction, `4` the
+    /// reset past `decay_period`.
+    pub fn reference_branch(
+        &self,
+        current_timestamp: u64,
+        adaptive_fee_constants: &AdaptiveFeeConstantsFacade,
+    ) -> u8 {
+        let max_timestamp = self
+            .last_reference_update_timestamp
+            .max(self.last_major_swap_timestamp);
+        if current_timestamp < max_timestamp {
+            return 0;
+        }
+        if current_timestamp - self.last_reference_update_timestamp > MAX_REFERENCE_AGE {
+            return 1;
+        }
+        let elapsed = current_timestamp - max_timestamp;
+        if elapsed < adaptive_fee_constants.filter_period as u64 {
+            2
+        } else if elapsed < adaptive_fee_constants.decay_period as u64 {
+            3
+        } else {
+            4
+        }
     }
 
     pub fn update_major_swap_timestamp(

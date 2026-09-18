@@ -424,7 +424,7 @@ pub fn compute_swap(
 
 // Private functions
 
-fn get_next_liquidity(
+pub(crate) fn get_next_liquidity(
     current_liquidity: u128,
     next_tick: Option<&TickFacade>,
     a_to_b: bool,
@@ -449,14 +449,14 @@ fn get_next_liquidity(
 }
 
 
-struct SwapStepQuote {
-    amount_in: u64,
-    amount_out: u64,
-    next_sqrt_price: u128,
-    fee_amount: u64,
+pub(crate) struct SwapStepQuote {
+    pub(crate) amount_in: u64,
+    pub(crate) amount_out: u64,
+    pub(crate) next_sqrt_price: u128,
+    pub(crate) fee_amount: u64,
 }
 
-fn compute_swap_step(
+pub(crate) fn compute_swap_step(
     amount_remaining: u64,
     fee_rate: u32,
     current_liquidity: u128,
