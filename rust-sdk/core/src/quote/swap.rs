@@ -345,7 +345,31 @@ pub fn compute_swap(
                 } else {
                     next_tick_index
                 }
-            } else if step_quote.next_sqrt_price != current_sqrt_price {
+            } else if step_quote.next_sqrt_price != current_sqrt_price
+                && crate::counters::enabled()
+            {
+                // **Only when counting, because nothing on the quote path ever reads it.**
+                //
+                // `current_tick_index` has exactly one reader: the outer loop's
+                // `prev_/next_initialized_tick`, at the top of the NEXT tick step. This branch is
+                // a step that stopped short of `next_tick_sqrt_price`, and there are only two
+                // ways that happens. Either the input ran out — an exact-in step that does not
+                // reach its target takes the whole remainder as fee (`compute_swap_step`), so
+                // `amount_remaining` is 0 and both loops exit — or the step stopped on an
+                // adaptive-fee tick-group bound, in which case the inner loop goes round again
+                // and this value is overwritten, by the crossing branch above or by this one,
+                // before the outer loop can see it. The fee manager does not read it either:
+                // `advance_tick_group_after_skip` derives its own tick index from the price.
+                //
+                // The on-chain program does make this call, so the compute-unit counters must
+                // still see it (`sqrt_to_tick_calls` and everything under it) — hence gated on
+                // counting rather than removed. It is 14 `u128` squarings plus, usually, a
+                // full tick-to-price ladder for the tie-break, on nearly every quote (most
+                // swaps end mid-tick) and once per sub-step on an adaptive-fee pool.
+                //
+                // With counting off `current_tick_index` is simply left stale, which is safe
+                // for the reason above and ONLY for exact-in: an exact-out caller would need to
+                // re-derive the argument before relying on this.
                 current_tick_index =
                     sqrt_price_to_tick_index(step_quote.next_sqrt_price.into()).into();
             }

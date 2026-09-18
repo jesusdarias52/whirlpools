@@ -363,6 +363,13 @@ mod imp {
 
     #[inline]
     pub fn snapshot() -> SwapCounters {
+        // Nothing has been counted on this thread since counting was switched off, so a
+        // `since()` over two of these is all-zero either way — and `compute_swap` takes two
+        // per call, which with counting off was two `RefCell` borrows and two 264-byte copies
+        // on every quote for a difference that is zero by construction.
+        if !enabled() {
+            return SwapCounters::ZERO;
+        }
         COUNTERS
             .try_with(|c| c.try_borrow().map(|c| *c).unwrap_or(SwapCounters::ZERO))
             .unwrap_or(SwapCounters::ZERO)
